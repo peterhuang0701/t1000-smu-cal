@@ -16,7 +16,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pyinstaller pyvisa pyvisa-py pyserial
+        run: pip install pyinstaller pyvisa pyvisa-py pyserial pillow
 
       - name: Build exe
         run: pyinstaller --clean SMU_Cal_Tool.spec

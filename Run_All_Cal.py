@@ -267,6 +267,11 @@ def StartLog():
     tee = Tee(logPath)
     sys.stdout = tee
     sys.stderr = tee
+    try:
+        from version import __version__
+        print('Tool Ver: {}'.format(__version__))
+    except ImportError:
+        pass
     print('Log file: {}'.format(logPath))
     print('Start   : {}\r\n'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
     return tee

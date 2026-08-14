@@ -18,12 +18,17 @@ jobs:
       - name: Install dependencies
         run: pip install pyinstaller pyvisa pyvisa-py pyserial pillow
 
+      - name: Get version
+        id: ver
+        shell: bash
+        run: echo "version=$(python -c 'from version import __version__; print(__version__)')" >> "$GITHUB_OUTPUT"
+
       - name: Build exe
         run: pyinstaller --clean SMU_Cal_Tool.spec
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: SMU_Cal_Tool
+          name: SMU_Cal_Tool-v${{ steps.ver.outputs.version }}
           path: dist/SMU_Cal_Tool.exe
           retention-days: 90

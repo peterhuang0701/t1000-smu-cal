@@ -105,7 +105,8 @@ class _LogWriter:
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('T1000 SMU Calibration Tool')
+        from version import __version__
+        self.title('T1000 SMU Calibration Tool  v{}'.format(__version__))
         self.geometry('760x640')
         self.resizable(True, True)
 

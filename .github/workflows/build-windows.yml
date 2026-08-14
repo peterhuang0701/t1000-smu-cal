@@ -1,0 +1,29 @@
+name: Build Windows exe
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pyinstaller pyvisa pyvisa-py pyserial
+
+      - name: Build exe
+        run: pyinstaller --clean SMU_Cal_Tool.spec
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SMU_Cal_Tool
+          path: dist/SMU_Cal_Tool.exe
+          retention-days: 90

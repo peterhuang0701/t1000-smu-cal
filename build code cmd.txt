@@ -1,0 +1,15 @@
+在 Windows 上 build (需先 pip install pyinstaller pyvisa pyvisa-py pyserial):
+
+pyinstaller --clean SMU_Cal_Tool.spec
+
+或不用 spec 直接下指令:
+
+pyinstaller --clean --noconsole --onefile --name SMU_Cal_Tool --icon=ico.ico --exclude-module matplotlib --exclude-module numpy --hidden-import Run_All_Cal --hidden-import LCR_CAL --hidden-import LCR_ADC --hidden-import LCR_SRC --hidden-import LCR_FUN --hidden-import K2460 --hidden-import gvar --hidden-import pyvisa_py smu_cal_gui.py
+
+產出在 dist\SMU_Cal_Tool.exe
+執行時 log 會寫在 exe 同層的 log\時間戳.csv (Excel可直接開)
+
+備註:
+- 2460 用 USB 或 GPIB 時, Windows 需裝 NI-VISA (或 Keysight VISA)
+- 2460 用 LAN (手動填IP) 時, 沒裝 VISA 也可以, 會自動退回 pyvisa-py
+- GPIB 另需 NI-488.2 驅動

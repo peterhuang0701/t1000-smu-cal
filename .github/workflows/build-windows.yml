@@ -3,7 +3,11 @@ name: Build Windows exe
 on:
   push:
     branches: [main]
+    tags: ['v*']
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -32,3 +36,15 @@ jobs:
           name: SMU_Cal_Tool-v${{ steps.ver.outputs.version }}
           path: dist/SMU_Cal_Tool.exe
           retention-days: 90
+
+      - name: Rename exe with version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: cp dist/SMU_Cal_Tool.exe "dist/SMU_Cal_Tool-v${{ steps.ver.outputs.version }}.exe"
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/SMU_Cal_Tool-v${{ steps.ver.outputs.version }}.exe
+          generate_release_notes: true

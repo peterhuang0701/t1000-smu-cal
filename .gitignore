@@ -8,3 +8,4 @@ fail.log
 Run_All_Cal_Standalone.py
 .DS_Store
 ~$*
+*.docx

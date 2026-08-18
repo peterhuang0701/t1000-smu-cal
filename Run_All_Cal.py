@@ -142,6 +142,9 @@ class CsvLog:
             diff = abs(meas[0]) - abs(ref[0])
         else:
             diff = meas[0] - ref[0]
+        if abs(ref[0]) < 0.001:
+            # 近零點(<1mV/1uA)百分比無意義, 只給絕對誤差, Err%留空
+            return '{:.6g}'.format(diff), '', abs(ref[0])
         errp = diff / abs(ref[0]) * 100
         return '{:.6g}'.format(diff), '{:.3f}'.format(errp), abs(ref[0])
 

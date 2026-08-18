@@ -269,10 +269,14 @@ server_addr=(IP,PORT)
 EthTimeout=10
 
 def _EthConnect():
-    # 建立連線並排空板子殘留的舊回覆, 避免回覆錯位
+    # 建立連線: 先送換行清掉板端殘留的半截輸入, 再排空殘留回覆, 避免指令黏包/回覆錯位
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(EthTimeout)
     sock.connect(server_addr)
+    try:
+        sock.send(b'\n')
+    except Exception:
+        pass
     sock.settimeout(0.3)
     try:
         while True:

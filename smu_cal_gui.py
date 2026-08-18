@@ -116,6 +116,21 @@ class App(tk.Tk):
         self.refresh_visa()
         self.refresh_mcu()
         self.after(100, self._poll_log)
+        threading.Thread(target=self._check_update, daemon=True).start()
+
+    def _check_update(self):
+        # 啟動時背景檢查GitHub最新Release, 不影響操作; 無網路只在log提示
+        try:
+            from version import __version__, check_latest, RELEASE_PAGE
+            tag, newer = check_latest()
+            if newer:
+                self.log_line('[UPDATE] 有新版 v{} (目前 v{}), 下載: {}'.format(
+                    tag, __version__, RELEASE_PAGE))
+                self.log_q.put(('__NEWVER__', tag))
+            else:
+                self.log_line('[UPDATE] 已是最新版 (v{})'.format(__version__))
+        except Exception as e:
+            self.log_line('[UPDATE] 版本檢查失敗(離線?): {}'.format(e))
 
     # --------- UI ---------
     def _build_ui(self):
@@ -294,7 +309,10 @@ class App(tk.Tk):
         try:
             while True:
                 item = self.log_q.get_nowait()
-                if item[0] == '__DONE__':
+                if item[0] == '__NEWVER__':
+                    if not self.running:
+                        self.status_var.set('有新版 v{} 可下載 (見log連結)'.format(item[1]))
+                elif item[0] == '__DONE__':
                     _, ok, msg = item
                     self.running = False
                     self.run_btn.configure(state='normal')

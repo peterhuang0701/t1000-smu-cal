@@ -32,7 +32,7 @@ from LCR_FUN import Func
 from LCR_ADC import ADCFunc
 from LCR_CAL import CalFunc
 import gvar
-from Run_All_Cal import StartLog, Rearm, CalLimitError
+from Run_All_Cal import StartLog, Rearm, CalLimitError, FinalizeWrites
 
 
 APC_IP = os.environ.get('SMU_APC_IP', '169.254.10.102')   # APC64_1, GUI可覆寫
@@ -398,13 +398,17 @@ class SelfCal:
         print('ATT Self Calibration End.....\r\n')
 
 
-def RunSelfCal(startStep=1, endStep=6):
+def RunSelfCal(startStep=1, endStep=6, confirmWrite=None):
     tee = StartLog()
     print('=== SELF CAL (no 2460) === Ref: on-board +/-2.5VREF & GND')
     print('SMU board IP  : {}:{}\r\n'.format(gvar.IP, gvar.PORT))
     sc = SelfCal()
     ATKRly = sc.F
+    # 延遲寫入: 過程只暫存, 全部完成後統一確認才寫EEPROM
+    gvar.EEPPending.clear()
+    gvar.EEPDefer = True
     t0 = time.time()
+    calOK = False
     try:
         if startStep <= 1 <= endStep:
             print('\r\n========== Step 1/6 : ADC Self Cal ==========\r\n')
@@ -441,6 +445,9 @@ def RunSelfCal(startStep=1, endStep=6):
             Rearm(ATKRly)
             sc.AttSelfCal()
 
+        calOK = True
+        FinalizeWrites(confirmWrite)
+
         print('\r\n========== Self Cal Done ({}~{}), {:.1f}s =========='.format(
             startStep, endStep, time.time() - t0))
     except CalLimitError as e:
@@ -448,6 +455,11 @@ def RunSelfCal(startStep=1, endStep=6):
         print('{}'.format(e))
         raise
     finally:
+        gvar.EEPDefer = False
+        if not calOK and gvar.EEPPending:
+            print('!!! 校正未完成, {}筆K值已丟棄, EEPROM未被更動'.format(
+                len(gvar.EEPPending)))
+            gvar.EEPPending.clear()
         try:
             sc.F.SysARST()
         except Exception:

@@ -1,4 +1,5 @@
 import os
+import re
 import socket
 import sys
 import time
@@ -296,8 +297,26 @@ except Exception as e:
     print('Error=',str(e))
     raise
 
+# --- EEPROM 延遲寫入模式 ---
+# EEPDefer=True 時: atk_eep_w_f 不真的寫板子, 先存進 EEPPending;
+# atk_eep_r_f 讀到待寫位址時回傳暫存值 (步驟間鏈式依賴照常運作)。
+# 校正全部完成後由 Run_All_Cal.FinalizeWrites() 統一確認寫入。
+EEPDefer = False
+EEPPending = {}   # int位址 -> float值
+
+
 def EthCmd(cmd_str):
     global op_sock
+    if EEPDefer:
+        m = re.match(r'^atk_eep_w_f_([0-9a-fA-F]+)_([-+0-9.eE]+)$', cmd_str)
+        if m:
+            EEPPending[int(m.group(1), 16)] = float(m.group(2))
+            return '{:.6f}\r\n'.format(float(m.group(2)))
+        m = re.match(r'^atk_eep_r_f_([0-9a-fA-F]+)$', cmd_str)
+        if m:
+            a = int(m.group(1), 16)
+            if a in EEPPending:
+                return '{:.6f}\r\n'.format(EEPPending[a])
     cmd_str += '\n'
     for retry in range(2):
         try:

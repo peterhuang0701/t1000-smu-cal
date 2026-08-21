@@ -62,6 +62,88 @@ def ReloadCalData(ATKCal):
         gvar.AdcCalPoint, gvar.AdcGainAddr, gvar.AdcOffAddr)
 
 
+# EEPROM 區塊定義: 結束時的寫入確認以此分組勾選
+EEP_BLOCKS = [
+    ('REF ±2.5V',       0x3600, 0x3607),
+    ('MUX Gain',        0x3608, 0x361F),
+    ('AC Amp',          0x3620, 0x363F),
+    ('MUX Offset',      0x3640, 0x365F),
+    ('ADC Gain/Offset', 0x4000, 0x407F),
+    ('SRC Gain/Offset', 0x4080, 0x41FF),
+    ('CCS ClampV',      0x4200, 0x427F),
+    ('CCS Current',     0x4280, 0x42FF),
+    ('ATT Gain/Offset', 0x4300, 0x43FF),
+]
+
+
+def PendingBlocks():
+    # 把 gvar.EEPPending 依區塊分組, 並讀EEPROM檢查目標位址是否已有資料
+    groups = []
+    for name, lo, hi in EEP_BLOCKS:
+        addrs = [a for a in sorted(gvar.EEPPending) if lo <= a <= hi]
+        if not addrs:
+            continue
+        exist = False
+        for a in addrs:
+            try:
+                cur = float(gvar.EthCmd('atk_eep_r_f_{:x}'.format(a)))
+                if abs(cur) > 1e-9:   # -0.000000/nan 視為未寫過
+                    exist = True
+                    break
+            except Exception:
+                pass
+        groups.append({'name': name, 'addrs': addrs, 'exist': exist})
+    other = [a for a in sorted(gvar.EEPPending)
+             if not any(lo <= a <= hi for _, lo, hi in EEP_BLOCKS)]
+    if other:
+        groups.append({'name': 'Other', 'addrs': other, 'exist': False})
+    return groups
+
+
+def ConsoleConfirm(blocks):
+    # CLI版確認: 列出區塊, Enter=全寫, n=全不寫, 或輸入編號(逗號分隔)
+    print('\r\n待寫入EEPROM區塊:')
+    for i, b in enumerate(blocks):
+        print('  {}. {} ({}筆){}'.format(
+            i + 1, b['name'], len(b['addrs']),
+            '  [EEPROM已有資料]' if b['exist'] else ''))
+    try:
+        if not sys.stdin.isatty():
+            return [b['name'] for b in blocks]   # 非互動環境: 全寫
+        ans = input('寫入哪些? Enter=全部, n=全部不寫, 或編號如1,3: ').strip()
+    except Exception:
+        return [b['name'] for b in blocks]
+    if ans == '':
+        return [b['name'] for b in blocks]
+    if ans.lower() == 'n':
+        return []
+    sel = []
+    for tok in ans.split(','):
+        try:
+            sel.append(blocks[int(tok) - 1]['name'])
+        except Exception:
+            pass
+    return sel
+
+
+def FinalizeWrites(confirmCb=None):
+    # 校正完成後統一寫入: 先關defer, 分組確認, 只寫勾選的區塊
+    gvar.EEPDefer = False
+    if not gvar.EEPPending:
+        return
+    blocks = PendingBlocks()
+    approved = (confirmCb or ConsoleConfirm)(blocks)
+    print('')
+    for b in blocks:
+        if b['name'] in approved:
+            for a in b['addrs']:
+                gvar.EthCmd('atk_eep_w_f_{:x}_{}'.format(a, gvar.EEPPending[a]))
+            print('[WRITE] {} ({}筆) 已寫入EEPROM'.format(b['name'], len(b['addrs'])))
+        else:
+            print('[SKIP ] {} ({}筆) 未寫入'.format(b['name'], len(b['addrs'])))
+    gvar.EEPPending.clear()
+
+
 CAL_LIMIT_PCT = 25.0     # 校正點(未校正的raw值)誤差超過25%判FAIL停止: 抓路徑錯亂
 CHECK_LIMIT_PCT = 10.0   # 驗證點(校正後)誤差超過10%判FAIL停止
 ERR_FLOOR = 0.001        # 絕對誤差低於0.001(V/mA)不觸發停止:
@@ -323,7 +405,7 @@ def CalRlyAllOff(ATKRly):
             print('Relay OFF fail: {} ({})'.format(rly, e))
 
 
-def RunCal(startStep=1, endStep=6, smuName=None):
+def RunCal(startStep=1, endStep=6, smuName=None, confirmWrite=None):
     if smuName is None:
         smuName = SMU
 
@@ -342,7 +424,12 @@ def RunCal(startStep=1, endStep=6, smuName=None):
 
     CalRlyOn(ATKRly)
 
+    # 延遲寫入: 過程只暫存, 全部完成後統一確認才寫EEPROM
+    gvar.EEPPending.clear()
+    gvar.EEPDefer = True
+
     t0 = time.time()
+    calOK = False
     try:
         # =========1. ADC Calibration===========
         if startStep <= 1 <= endStep:
@@ -400,6 +487,9 @@ def RunCal(startStep=1, endStep=6, smuName=None):
             Rearm(ATKRly)
             ATKCal.ATTPathCal()
 
+        calOK = True
+        FinalizeWrites(confirmWrite)
+
         print('\r\n========== All Calibration Done ({}~{}), {:.1f}s =========='.format(
             startStep, endStep, time.time() - t0))
         print('End     : {}'.format(datetime.now().strftime('%Y-%m-%d %H:%M:%S')))
@@ -411,6 +501,11 @@ def RunCal(startStep=1, endStep=6, smuName=None):
         raise
     finally:
         # 不論成功或中途出錯, 都關掉輸出與所有校正繼電器, 並收尾log
+        gvar.EEPDefer = False
+        if not calOK and gvar.EEPPending:
+            print('!!! 校正未完成, {}筆K值已丟棄, EEPROM未被更動'.format(
+                len(gvar.EEPPending)))
+            gvar.EEPPending.clear()
         try:
             scpi.gpibOff()
         except Exception:

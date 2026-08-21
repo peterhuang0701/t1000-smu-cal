@@ -87,13 +87,15 @@ class CalWorker:
 
             if self.cfg.get('selfcal'):
                 import Self_Cal as SC
-                SC.RunSelfCal(self.cfg['start'], self.cfg['end'])
+                SC.RunSelfCal(self.cfg['start'], self.cfg['end'],
+                              confirmWrite=self.cfg.get('confirm_cb'))
                 self.done(True, 'Self Cal Finished (Step {}~{})'.format(
                     self.cfg['start'], self.cfg['end']))
             else:
                 import Run_All_Cal as RAC
                 RAC.RunCal(self.cfg['start'], self.cfg['end'],
-                           smuName=self.cfg['smu_res'])
+                           smuName=self.cfg['smu_res'],
+                           confirmWrite=self.cfg.get('confirm_cb'))
                 self.done(True, 'Calibration Finished (Step {}~{})'.format(
                     self.cfg['start'], self.cfg['end']))
         except Exception as e:
@@ -117,6 +119,48 @@ class _LogWriter:
 
     def flush(self):
         pass
+
+
+def show_write_confirm(parent, blocks, res, evt):
+    # 校正完成後的寫入確認彈窗: 依區塊勾選要寫進EEPROM的項目
+    win = tk.Toplevel(parent)
+    win.title('寫入K值確認')
+    win.grab_set()   # modal
+    ttk.Label(win, text='校正完成, 勾選要寫入EEPROM的區塊:',
+              font=('', 11, 'bold')).pack(anchor='w', padx=12, pady=(12, 6))
+    vars_ = []
+    for b in blocks:
+        v = tk.BooleanVar(value=True)
+        txt = '{} ({}筆)'.format(b['name'], len(b['addrs']))
+        if b['exist']:
+            txt += '   ⚠ EEPROM已有資料, 將被覆蓋'
+        ttk.Checkbutton(win, text=txt, variable=v).pack(anchor='w', padx=24, pady=2)
+        vars_.append((b['name'], v))
+
+    def finish(sel):
+        res['sel'] = sel
+        evt.set()
+        win.destroy()
+
+    bar = ttk.Frame(win)
+    bar.pack(fill='x', pady=12, padx=12)
+    ttk.Button(bar, text='寫入勾選項目',
+               command=lambda: finish([n for n, v in vars_ if v.get()]))\
+        .pack(side='left', padx=6)
+    ttk.Button(bar, text='全部不寫',
+               command=lambda: finish([])).pack(side='left', padx=6)
+    win.protocol('WM_DELETE_WINDOW', lambda: finish([]))   # 關窗=不寫
+
+
+def make_confirm_cb(window):
+    # 給worker執行緒用的確認callback: 丟給GUI主執行緒開彈窗, Event等答案
+    def cb(blocks):
+        evt = threading.Event()
+        res = {}
+        window.log_q.put(('__CONFIRM__', blocks, res, evt))
+        evt.wait()
+        return res.get('sel', [])
+    return cb
 
 
 # ------------------------------------------------------------------
@@ -189,7 +233,8 @@ class SelfCalWindow(tk.Toplevel):
 
         cfg = {'selfcal': True, 'board_ip': ip, 'mcu_port': '',
                'apc_ip': self.apc_ip.get().strip(),
-               'start': start, 'end': end, 'smu_res': ''}
+               'start': start, 'end': end, 'smu_res': '',
+               'confirm_cb': make_confirm_cb(self)}
         self.app.running = True
         self.run_btn.configure(state='disabled')
         self.status_var.set('Running... (Step {}~{})'.format(start, end))
@@ -206,7 +251,10 @@ class SelfCalWindow(tk.Toplevel):
         try:
             while True:
                 item = self.log_q.get_nowait()
-                if item[0] == '__DONE__':
+                if item[0] == '__CONFIRM__':
+                    _, blocks, res, evt = item
+                    show_write_confirm(self, blocks, res, evt)
+                elif item[0] == '__DONE__':
                     _, ok, msg = item
                     self.app.running = False
                     self.run_btn.configure(state='normal')
@@ -417,7 +465,8 @@ class App(tk.Tk):
             return
 
         cfg = {'smu_res': smu_res, 'board_ip': board_ip,
-               'mcu_port': mcu, 'start': start, 'end': end}
+               'mcu_port': mcu, 'start': start, 'end': end,
+               'confirm_cb': make_confirm_cb(self)}
 
         self.running = True
         self.run_btn.configure(state='disabled')
@@ -441,7 +490,10 @@ class App(tk.Tk):
         try:
             while True:
                 item = self.log_q.get_nowait()
-                if item[0] == '__NEWVER__':
+                if item[0] == '__CONFIRM__':
+                    _, blocks, res, evt = item
+                    show_write_confirm(self, blocks, res, evt)
+                elif item[0] == '__NEWVER__':
                     if not self.running:
                         self.status_var.set('有新版 v{} 可下載 (見log連結)'.format(item[1]))
                 elif item[0] == '__DONE__':

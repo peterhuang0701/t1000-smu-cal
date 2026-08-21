@@ -329,37 +329,43 @@ class SelfCal:
                 print('Fail, {} Out of Range'.format(name))
             results.append(gain)
 
-        # ATT PASS(1x) 路徑分段表 (無2460: DRA當源, DR1BUF讀回當真值)
-        print('ATT PASS Path Self Calibration Start.....\r\n')
+        # ATT 路徑分段表 PASS/D5/D10 (無2460: DRA當源, DR1BUF讀回當真值)
         BUFPATH = (gvar.MUX1_BUF | gvar.MUX2_PASS | gvar.MUX3_PASS |
                    gvar.MUX4_PASS | gvar.MUX5_NG05)
         ATTMUX = (gvar.MUX1_ATT | gvar.MUX2_PASS | gvar.MUX3_PASS |
                   gvar.MUX4_PASS | gvar.MUX5_NG05)
-        self.F.SetAtt1Rly('ALL', 'OFF')
-        self.F.SetATT(gvar.ATT_HP_MS | gvar.ATT_HP_1X |
-                      gvar.ATT_LP_SS | gvar.ATT_LP_1X)
-        volt_array, adc_array = [], []
-        for v in gvar.ATTCalPoint:
-            SRC.SetDraDcSrc(v)
-            self.F.SetMUX(BUFPATH)
-            time.sleep(0.2)
-            truth = self._measNeg05()            # DR1BUF讀回 = 真值
-            self.F.SetMUX(ATTMUX)
-            time.sleep(0.2)
-            attv = self._calAdc() * gvar.ATTPassNom   # ATT路徑×標稱倍率回輸入尺度
-            volt_array.append(truth)
-            adc_array.append(attv)
-            print('SRC= {}'.format(v))
-            print('BUF  = {:.6f}'.format(truth))
-            print('ATTP = {:.6f}\r\n'.format(attv))
-        slope, off = self.F.SlopeOffset(volt_array, adc_array, 1, 0)
-        passOK = all(0.9 < float(s) < 1.1 for s in slope)
-        if passOK:
-            self.F.WriteRom(gvar.ATTPassPGainAddr, gvar.ATTPassPOffAddr,
-                            gvar.ATTCalPoint, slope, off)
-        else:
-            print('Fail, ATT PASS Path slope out of range, NOT written: {}'.format(slope))
-        print('ATT PASS Path Self Calibration End.....\r\n')
+        for pname, hp, lp, nom, addrG, addrO in (
+                ('PASS', gvar.ATT_HP_1X,  gvar.ATT_LP_1X,  gvar.ATTPassNom,
+                 gvar.ATTPassPGainAddr, gvar.ATTPassPOffAddr),
+                ('D5',   gvar.ATT_HP_D5,  gvar.ATT_LP_D5,  -10.0,
+                 gvar.ATTD5PGainAddr,  gvar.ATTD5POffAddr),
+                ('D10',  gvar.ATT_HP_D10, gvar.ATT_LP_D10, -20.0,
+                 gvar.ATTD10PGainAddr, gvar.ATTD10POffAddr)):
+            print('ATT {} Path Self Calibration Start.....\r\n'.format(pname))
+            self.F.SetAtt1Rly('ALL', 'OFF')
+            self.F.SetATT(gvar.ATT_HP_MS | hp | gvar.ATT_LP_SS | lp)
+            volt_array, adc_array = [], []
+            for v in gvar.ATTCalPoint:
+                SRC.SetDraDcSrc(v)
+                self.F.SetMUX(BUFPATH)
+                time.sleep(0.2)
+                truth = self._measNeg05()            # DR1BUF讀回 = 真值
+                self.F.SetMUX(ATTMUX)
+                time.sleep(0.2)
+                attv = self._calAdc() * nom          # ATT路徑×標稱倍率回輸入尺度
+                volt_array.append(truth)
+                adc_array.append(attv)
+                print('SRC= {}'.format(v))
+                print('BUF  = {:.6f}'.format(truth))
+                print('ATTP = {:.6f}\r\n'.format(attv))
+            slope, off = self.F.SlopeOffset(volt_array, adc_array, 1, 0)
+            pathOK = all(0.9 < float(s) < 1.1 for s in slope)
+            if pathOK:
+                self.F.WriteRom(addrG, addrO, gvar.ATTCalPoint, slope, off)
+            else:
+                print('Fail, ATT {} Path slope out of range, NOT written: {}'.format(
+                    pname, slope))
+            print('ATT {} Path Self Calibration End.....\r\n'.format(pname))
 
         # ATT path offset: 源設0V+接GND, D10路徑ADC端殘餘 (與ATTGainCal存法相同)
         self.F.SetAtt1Rly('ALL', 'OFF')

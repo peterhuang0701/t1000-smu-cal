@@ -9,6 +9,7 @@ a = Analysis(
     hiddenimports=[
         # worker 內動態 import, pyinstaller 靜態分析抓不到, 需明列
         'Run_All_Cal',
+        'Self_Cal',
         'LCR_CAL',
         'LCR_ADC',
         'LCR_SRC',

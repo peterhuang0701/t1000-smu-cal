@@ -72,6 +72,7 @@ ATTCalPoint=[-5, -3, 0, 3, 5]     # ATT路徑校正點 (2460當源)
 ATTChkPoint=[-4, -1, 1, 4]
 ATTD5Nom  = -10.0    # D5路徑標稱倍率 (÷5再×-0.5 → ADC讀值×-10=輸入電壓)
 ATTD10Nom = -20.0    # D10路徑標稱倍率
+ATTPassNom = -2.0    # PASS(1x)路徑標稱倍率 (×1再×-0.5 → ADC讀值×-2=輸入電壓)
 
 PP2V5RefAddr 	= '3600'
 PN2V5RefAddr 	= '3604'
@@ -122,6 +123,8 @@ ATTD5PGainAddr	= '4310'    # D5路徑 gain x4
 ATTD5POffAddr	= '4330'    # D5路徑 offset x4
 ATTD10PGainAddr	= '4350'    # D10路徑 gain x4
 ATTD10POffAddr	= '4370'    # D10路徑 offset x4
+ATTPassPGainAddr	= '4390'    # PASS(1x)路徑 gain x4 (已確認空位)
+ATTPassPOffAddr	= '43B0'    # PASS(1x)路徑 offset x4
 
 DRA0R	= 	0
 DRA10R	=	1
@@ -380,6 +383,11 @@ if CalEn:
 	if not all(0.5 < g < 2.0 for g in ATTD10PGain):
 		ATTD10PGain   = [1.0]*(len(ATTCalPoint)-1)
 		ATTD10POffset = [0.0]*(len(ATTCalPoint)-1)
+	ATTPassPGain   = ReadCalData(len(ATTCalPoint)-1, ATTPassPGainAddr)
+	ATTPassPOffset = ReadCalData(len(ATTCalPoint)-1, ATTPassPOffAddr)
+	if not all(0.5 < g < 2.0 for g in ATTPassPGain):
+		ATTPassPGain   = [1.0]*(len(ATTCalPoint)-1)
+		ATTPassPOffset = [0.0]*(len(ATTCalPoint)-1)
 
 	SRCAMP100HZ  = float(EthCmd('atk_eep_r_f_{}'.format(SrcAcAmp100HZ)))
 	SRCAMP1KHZ   = float(EthCmd('atk_eep_r_f_{}'.format(SrcAcAmp1KHZ)))
@@ -428,6 +436,8 @@ else:
 	ATTD5POffset  = [0.0, 0.0, 0.0, 0.0]
 	ATTD10PGain   = [1.0, 1.0, 1.0, 1.0]
 	ATTD10POffset = [0.0, 0.0, 0.0, 0.0]
+	ATTPassPGain   = [1.0, 1.0, 1.0, 1.0]
+	ATTPassPOffset = [0.0, 0.0, 0.0, 0.0]
 
 	SRCAMP100HZ  = 0.707
 	SRCAMP1KHZ   = 0.707

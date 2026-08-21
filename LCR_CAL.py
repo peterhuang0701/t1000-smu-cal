@@ -611,6 +611,8 @@ class CalFunc:
              gvar.ATTD5PGainAddr,  gvar.ATTD5POffAddr),
             ('D10', gvar.ATT_HP_D10, gvar.ATT_LP_D10, gvar.ATTD10Nom,
              gvar.ATTD10PGainAddr, gvar.ATTD10POffAddr),
+            ('PASS', gvar.ATT_HP_1X, gvar.ATT_LP_1X, gvar.ATTPassNom,
+             gvar.ATTPassPGainAddr, gvar.ATTPassPOffAddr),
         ]
         for name,hp,lp,nom,addrG,addrO in PathList:
             print('ATT {} Path Calibration Start.....\r\n'.format(name))

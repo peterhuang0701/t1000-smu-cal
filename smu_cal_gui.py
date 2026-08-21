@@ -25,6 +25,15 @@ DEFAULT_SMU_IP = '169.254.10.101'
 DEFAULT_K2460_IP = '169.254.10.222'
 DEFAULT_MCU_NAME = 'SMU_CALB'
 
+SELF_STEP_NAMES = [
+    '1 : ADC Self Cal (±2.5VREF)',
+    '2 : MUX Offset',
+    '3 : MUX Gain',
+    '4 : SRC DC (DRA/DRB)',
+    '5 : CCS Clamp V',
+    '6 : ATT (治具loopback)',
+]
+
 STEP_NAMES = [
     '1 : ADC1 Calibration',
     '2 : SRC DC Calibration (DRA/DRB)',
@@ -51,7 +60,10 @@ class CalWorker:
         sys.stderr = writer
         try:
             os.environ['SMU_IP'] = self.cfg['board_ip']
-            os.environ['SMU_MCU_PORT'] = self.cfg['mcu_port']
+            if self.cfg.get('mcu_port'):
+                os.environ['SMU_MCU_PORT'] = self.cfg['mcu_port']
+            else:
+                os.environ.pop('SMU_MCU_PORT', None)   # 交給gvar自動偵測SMU_CALB
 
             # 先關掉上一輪的連線: 板子只接受單一TCP連線, 不關掉重連會被reset
             old_gvar = sys.modules.get('gvar')
@@ -67,15 +79,21 @@ class CalWorker:
                     pass
 
             # 每次執行都重新載入模組: 套用新IP/串口設定, 並重置shadow狀態
-            for m in ('Run_All_Cal', 'LCR_CAL', 'LCR_ADC', 'LCR_SRC',
-                      'LCR_FUN', 'K2460', 'gvar'):
+            for m in ('Self_Cal', 'Run_All_Cal', 'LCR_CAL', 'LCR_ADC',
+                      'LCR_SRC', 'LCR_FUN', 'K2460', 'gvar'):
                 sys.modules.pop(m, None)
 
-            import Run_All_Cal as RAC
-            RAC.RunCal(self.cfg['start'], self.cfg['end'],
-                       smuName=self.cfg['smu_res'])
-            self.done(True, 'Calibration Finished (Step {}~{})'.format(
-                self.cfg['start'], self.cfg['end']))
+            if self.cfg.get('selfcal'):
+                import Self_Cal as SC
+                SC.RunSelfCal(self.cfg['start'], self.cfg['end'])
+                self.done(True, 'Self Cal Finished (Step {}~{})'.format(
+                    self.cfg['start'], self.cfg['end']))
+            else:
+                import Run_All_Cal as RAC
+                RAC.RunCal(self.cfg['start'], self.cfg['end'],
+                           smuName=self.cfg['smu_res'])
+                self.done(True, 'Calibration Finished (Step {}~{})'.format(
+                    self.cfg['start'], self.cfg['end']))
         except Exception as e:
             import traceback
             traceback.print_exc()
@@ -97,6 +115,106 @@ class _LogWriter:
 
     def flush(self):
         pass
+
+
+# ------------------------------------------------------------------
+# Self Cal 視窗: 只需SMU板IP, 不需2460 (基準為板上±2.5VREF)
+# ------------------------------------------------------------------
+class SelfCalWindow(tk.Toplevel):
+    def __init__(self, app):
+        super().__init__(app)
+        self.app = app
+        self.title('Self Calibration (不需2460)')
+        self.geometry('640x520')
+        self.log_q = queue.Queue()
+        pad = {'padx': 6, 'pady': 4}
+
+        f1 = ttk.LabelFrame(self, text='連線')
+        f1.pack(fill='x', **pad)
+        ttk.Label(f1, text='SMU 板 IP:').grid(row=0, column=0, sticky='e', **pad)
+        self.board_ip = tk.StringVar(value=app.board_ip.get() or DEFAULT_SMU_IP)
+        ttk.Entry(f1, textvariable=self.board_ip, width=20)\
+            .grid(row=0, column=1, sticky='w', **pad)
+        ttk.Label(f1, text='(基準: 板上±2.5VREF, 步驟6需接治具)')\
+            .grid(row=0, column=2, sticky='w', **pad)
+
+        f2 = ttk.LabelFrame(self, text='步驟')
+        f2.pack(fill='x', **pad)
+        ttk.Label(f2, text='從').grid(row=0, column=0, **pad)
+        self.step_start = ttk.Combobox(f2, values=SELF_STEP_NAMES, width=28,
+                                       state='readonly')
+        self.step_start.current(0)
+        self.step_start.grid(row=0, column=1, **pad)
+        ttk.Label(f2, text='到').grid(row=0, column=2, **pad)
+        self.step_end = ttk.Combobox(f2, values=SELF_STEP_NAMES, width=28,
+                                     state='readonly')
+        self.step_end.current(5)
+        self.step_end.grid(row=0, column=3, **pad)
+
+        f3 = ttk.Frame(self)
+        f3.pack(fill='x', **pad)
+        self.run_btn = ttk.Button(f3, text='Start Self Cal',
+                                  command=self.start_selfcal)
+        self.run_btn.pack(side='left', padx=6)
+        self.status_var = tk.StringVar(value='Idle')
+        ttk.Label(f3, textvariable=self.status_var).pack(side='left', padx=12)
+
+        self.log_box = scrolledtext.ScrolledText(self, height=18,
+                                                 state='disabled',
+                                                 font=('Consolas', 10))
+        self.log_box.pack(fill='both', expand=True, **pad)
+        self.after(100, self._poll_log)
+
+    def start_selfcal(self):
+        if self.app.running:
+            messagebox.showwarning('Busy', '已有校正在執行中', parent=self)
+            return
+        ip = self.board_ip.get().strip()
+        if not ip:
+            messagebox.showwarning('SMU', '請填 SMU 板 IP', parent=self)
+            return
+        start = self.step_start.current() + 1
+        end = self.step_end.current() + 1
+        if start > end:
+            messagebox.showwarning('步驟', '起始步驟不能大於結束步驟', parent=self)
+            return
+
+        cfg = {'selfcal': True, 'board_ip': ip, 'mcu_port': '',
+               'start': start, 'end': end, 'smu_res': ''}
+        self.app.running = True
+        self.run_btn.configure(state='disabled')
+        self.status_var.set('Running... (Step {}~{})'.format(start, end))
+        self.log_line('=' * 60)
+        self.log_line('[CFG] Self Cal  Board={}  Step {}~{}'.format(ip, start, end))
+        worker = CalWorker(cfg, self.log_line,
+                           lambda ok, msg: self.log_q.put(('__DONE__', ok, msg)))
+        threading.Thread(target=worker.run, daemon=True).start()
+
+    def log_line(self, msg):
+        self.log_q.put(('__LOG__', msg))
+
+    def _poll_log(self):
+        try:
+            while True:
+                item = self.log_q.get_nowait()
+                if item[0] == '__DONE__':
+                    _, ok, msg = item
+                    self.app.running = False
+                    self.run_btn.configure(state='normal')
+                    self.status_var.set(msg)
+                    self._append(('[OK] ' if ok else '[FAIL] ') + msg)
+                else:
+                    self._append(item[1])
+        except queue.Empty:
+            pass
+        if self.winfo_exists():
+            self.after(100, self._poll_log)
+
+    def _append(self, line):
+        self.log_box.configure(state='normal')
+        self.log_box.insert('end', line + '\n')
+        self.log_box.see('end')
+        self.log_box.configure(state='disabled')
 
 
 # ------------------------------------------------------------------
@@ -196,6 +314,8 @@ class App(tk.Tk):
         self.run_btn = ttk.Button(f4, text='Start Calibration',
                                   command=self.start_cal)
         self.run_btn.pack(side='left', padx=6)
+        ttk.Button(f4, text='Self Cal...', command=self.open_selfcal)\
+            .pack(side='left', padx=6)
         self.status_var = tk.StringVar(value='Idle')
         ttk.Label(f4, textvariable=self.status_var).pack(side='left', padx=12)
 
@@ -206,6 +326,9 @@ class App(tk.Tk):
         self.log_box.pack(fill='both', expand=True, **pad)
 
         self._update_mode()
+
+    def open_selfcal(self):
+        SelfCalWindow(self)
 
     def _update_mode(self):
         visa = self.k2460_mode.get() == 'visa'

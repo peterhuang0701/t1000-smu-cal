@@ -94,6 +94,12 @@ class SelfCal:
             v = float(gvar.EthCmd('atk_eep_r_f_{}'.format(a)))
             gvar.MUXOFF[k] = v if -0.01 < v < 0.01 else 0.0
 
+    def _setMuxAbs(self, value):
+        # SetMUX是OR進shadow, 低位元切不回去(ATT 0x7 -> BUF 0x2 會殘留0x7);
+        # 先清shadow再寫, 確保MUX路徑為絕對值
+        gvar.Mux1Lch1Data = 0
+        self.F.SetMUX(value)
+
     def _measNeg05(self):
         # 經 MUX5 -0.5X 摺回ADC範圍的讀值還原成輸入電壓
         mv = self._calAdc()
@@ -318,7 +324,7 @@ class SelfCal:
             self.F.SetATT(ATTPATH)
             MUXPATH = (gvar.MUX1_ATT | gvar.MUX2_PASS | gvar.MUX3_PASS |
                        gvar.MUX4_PASS | gvar.MUX5_NG05)
-            self.F.SetMUX(MUXPATH)
+            self._setMuxAbs(MUXPATH)
             time.sleep(0.2)
             att_v = self._measNeg05()
             gain = abs(att_v / src)
@@ -347,10 +353,14 @@ class SelfCal:
             volt_array, adc_array = [], []
             for v in gvar.ATTCalPoint:
                 SRC.SetDraDcSrc(v)
-                self.F.SetMUX(BUFPATH)
+                self._setMuxAbs(BUFPATH)
                 time.sleep(0.2)
                 truth = self._measNeg05()            # DR1BUF讀回 = 真值
-                self.F.SetMUX(ATTMUX)
+                if abs(truth - v) > 0.5:
+                    raise CalLimitError(
+                        'ATT {} BUF truth abnormal: set={} read={:.4f} '
+                        '(MUX path not switching?)'.format(pname, v, truth))
+                self._setMuxAbs(ATTMUX)
                 time.sleep(0.2)
                 attv = self._calAdc() * nom          # ATT路徑×標稱倍率回輸入尺度
                 volt_array.append(truth)
@@ -371,7 +381,7 @@ class SelfCal:
         self.F.SetAtt1Rly('ALL', 'OFF')
         self.F.SetATT(gvar.ATT_HP_MS | gvar.ATT_HP_D10 |
                       gvar.ATT_LP_SS | gvar.ATT_LP_D10)
-        self.F.SetMUX(ATTMUX)
+        self._setMuxAbs(ATTMUX)
         SRC.SetDraDcSrc(0)
         self.F.SelSrc('GND')
         time.sleep(0.2)

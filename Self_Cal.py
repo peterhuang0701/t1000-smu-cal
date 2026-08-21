@@ -13,7 +13,7 @@
 #   3 MUX gain          (DRA raw源+ADC比值法, 取代2460)
 #   4 SRC DC            (DRA-L直讀 / DRA-H與DRB經MUX5 -0.5X摺回ADC範圍)
 #   5 CCS Clamp V       (經MUX1=DR1OUT讀鉗位輸出)
-#   6 ATT gain + offset (治具loopback MP<->MS, 只需MCU不需2460)
+#   6 ATT gain + offset (APC母線loopback MP<->MS, atk_bus_f; 不需治具MCU與2460)
 #
 # 不包含: CCS電流(需外部電流表), ATT五點分段表(需外部精準源), AC校正, ±2.5VREF本身
 #
@@ -33,6 +33,23 @@ from LCR_ADC import ADCFunc
 from LCR_CAL import CalFunc
 import gvar
 from Run_All_Cal import StartLog, Rearm, CalLimitError
+
+
+APC_IP = os.environ.get('SMU_APC_IP', '169.254.10.102')   # APC64_1, GUI可覆寫
+APC_PORT = 7600
+
+
+def ApcCmd(cmd, timeout=3.0):
+    # 對APC64送一條atk_*指令 (loopback用, 每次短連線, 用完即關)
+    import socket
+    sk = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sk.settimeout(timeout)
+    try:
+        sk.connect((APC_IP, APC_PORT))
+        sk.send((cmd + '\n').encode('utf-8'))
+        return sk.recv(1024).decode('utf-8').strip()
+    finally:
+        sk.close()
 
 
 def RefVolt():
@@ -268,12 +285,9 @@ class SelfCal:
     # ---------- 6. ATT gain + offset (治具loopback) ----------
     def AttSelfCal(self):
         print('ATT Self Calibration Start.....\r\n')
-        gvar.MCUCmd('atk_frst_high')
-        # MP<->MS / SP<->SS 經治具母線loopback (不接2460)
-        self.F.SetCalSmuRly('SMU_P_MP', 'ON')
-        self.F.SetCalSmuRly('SMU_P_MS', 'ON')
-        self.F.SetCalSmuRly('SMU_N_SP', 'ON')
-        self.F.SetCalSmuRly('SMU_N_SS', 'ON')
+        # MP<->MS / SP<->SS 經APC母線loopback (rack環境, 不需治具MCU與2460)
+        print('APC loopback: {} atk_bus_f'.format(APC_IP))
+        ApcCmd('atk_bus_f')
         self.F.SetDr1OutRly('GNDSP', 'ON')
         self.F.SetDr1OutRly('GNDGP', 'ON')
         self.F.SetDr1OutRly('DR1MP', 'ON')
@@ -364,10 +378,7 @@ class SelfCal:
 
         self.F.SetAtt1Rly('ALL', 'OFF')
         self.F.SysARST()
-        self.F.SetCalSmuRly('SMU_P_MP', 'OFF')
-        self.F.SetCalSmuRly('SMU_P_MS', 'OFF')
-        self.F.SetCalSmuRly('SMU_N_SP', 'OFF')
-        self.F.SetCalSmuRly('SMU_N_SS', 'OFF')
+        ApcCmd('atk_bus_0')   # 放開APC母線
         print('ATT Self Calibration End.....\r\n')
 
 

@@ -31,7 +31,7 @@ SELF_STEP_NAMES = [
     '3 : MUX Gain',
     '4 : SRC DC (DRA/DRB)',
     '5 : CCS Clamp V',
-    '6 : ATT (治具loopback)',
+    '6 : ATT (APC loopback)',
 ]
 
 STEP_NAMES = [
@@ -60,6 +60,8 @@ class CalWorker:
         sys.stderr = writer
         try:
             os.environ['SMU_IP'] = self.cfg['board_ip']
+            if self.cfg.get('apc_ip'):
+                os.environ['SMU_APC_IP'] = self.cfg['apc_ip']
             if self.cfg.get('mcu_port'):
                 os.environ['SMU_MCU_PORT'] = self.cfg['mcu_port']
             else:
@@ -135,8 +137,14 @@ class SelfCalWindow(tk.Toplevel):
         self.board_ip = tk.StringVar(value=app.board_ip.get() or DEFAULT_SMU_IP)
         ttk.Entry(f1, textvariable=self.board_ip, width=20)\
             .grid(row=0, column=1, sticky='w', **pad)
-        ttk.Label(f1, text='(基準: 板上±2.5VREF, 步驟6需接治具)')\
+        ttk.Label(f1, text='(基準: 板上±2.5VREF, 不需2460)')\
             .grid(row=0, column=2, sticky='w', **pad)
+        ttk.Label(f1, text='APC IP:').grid(row=1, column=0, sticky='e', **pad)
+        self.apc_ip = tk.StringVar(value='169.254.10.102')
+        ttk.Entry(f1, textvariable=self.apc_ip, width=20)\
+            .grid(row=1, column=1, sticky='w', **pad)
+        ttk.Label(f1, text='(步驟6 loopback用, 只跑1~5可不填)')\
+            .grid(row=1, column=2, sticky='w', **pad)
 
         f2 = ttk.LabelFrame(self, text='步驟')
         f2.pack(fill='x', **pad)
@@ -180,6 +188,7 @@ class SelfCalWindow(tk.Toplevel):
             return
 
         cfg = {'selfcal': True, 'board_ip': ip, 'mcu_port': '',
+               'apc_ip': self.apc_ip.get().strip(),
                'start': start, 'end': end, 'smu_res': ''}
         self.app.running = True
         self.run_btn.configure(state='disabled')

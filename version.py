@@ -1,6 +1,6 @@
 # 版本號單一來源: 發版時改這裡, GUI標題/log/CI artifact都會跟著變
 # 慣例: 主版本.次版本.修訂 (功能大改.加功能.修bug)
-__version__ = '1.2.0'
+__version__ = '1.2.1'
 
 GITHUB_REPO = 'peterhuang0701/t1000-smu-cal'
 RELEASE_PAGE = 'https://github.com/{}/releases/latest'.format(GITHUB_REPO)
